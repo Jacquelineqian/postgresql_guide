@@ -1,0 +1,119 @@
+7 事务与并发控制
+    为解决并发导致的资源竞争和数据不一致 引入并发控制机制 (基于锁的 和 基于多版本 的2种并发控制机制)
+    重点讨论基于多版本的并发控制机制
+    7.2 事务和并发控制的概念
+        事物的特性: 原子性 不可分割
+                  一致性
+                  隔离性 事务都独立运行
+                  持久性
+
+        如果错误并发写入/读取数据库 会出现非预期现象:
+                  脏读            读取到已修改、将回滚的数据
+                  不可重复读       在同一事务中执行2次查询操作 期间修改值并提交 查询结果不一致
+                  幻读            同上 期间ADD/DELETE值
+                  序列化异常       一组事务执行结果 和 序列化执行的结果不一致
+                                (e.g. 一个事务执行递增 一个事物执行阶乘 先后顺序不同结果不同)
+
+
+
+
+        隔离级别:   Read Uncommited 读未提交        不隔离
+                  Read Committed  读已提交
+                  Repeatable Read   可重复读        可能读到被删除了的 或者新添加的值 但是数据行一致 同一数据行结果一致
+                  Serializable      可序列化        完全按顺序执行事务 数据完全一致
+
+        ANSI SQL 美国国家标准化组织 American National standart institution
+        隔离级别                    脏读      不可重复读       幻读
+        Read Uncommited           可能       可能            可能
+        Read Commited             不可能     可能            可能
+        Repeatable Read           不可能     不可能           可能
+        Serializable              不可能     不可能           不可能
+
+        Postgresql
+        隔离级别                    脏读      不可重复读       幻读      序列化异常
+        Read Uncommited           不可能     可能            可能      可能
+        Read Commited             不可能     不可能           可能     可能
+        Repeatable Read           不可能     不可能           不可能    可能
+        Serializable              不可能     不可能           不可能    不可能
+
+    7.2.1 查看 设置 事务隔离级别
+
+        select name,setting from pg_settings where name='default_transaction_isolation';
+
+        select current_setting('default_transaction_isolation');
+
+    7.2.2 修改全局的事务隔离级别   // 事务开启时无法执行 报transaction abort
+
+        alter system set default_trasactio_isolation to 'REPEATABLE READ';
+
+        select pg_reload_conf();    // ERROR:  permission denied for function pg_reload_conf
+
+        select current_setting('transaction_isolation');
+
+    7.2.3 查看当前会话的事务隔离级别
+
+        show transaction_isolation;
+
+        select current_setting('transaction_isolation');
+
+
+    // Question : 所有的事务执行均未出现脏读 幻读 序列化问题
+        (先*10 再+1时 先开启的事务提交完毕后 +1的操作才执行完毕 及update +1时一直卡顿 // 猜测是锁机制)
+
+    7.3 postgresql的并发控制
+
+    并发控制模型: 基于锁的并发控制    Lock-Based Concurrency Control
+                基于多版本的并发控制  Multi-Version Concurrency Control
+
+    并发技术手段:
+                封锁 时间戳 乐观并发控制(乐观锁) 悲观并发控制(悲观锁)
+
+    封锁:
+        分为 排它锁 exclusive locks X锁
+            共享锁 share locks     S锁
+
+        封锁对象的大小被称为 封锁粒度
+
+        封锁对象为: 逻辑单元: 属性值 属性值的集合 元组 关系 索引项 整个索引项 数据库
+                  物理单元: 页 物理记录
+
+        封锁协议: 阐明事务何时加锁/解锁的规则
+
+        sql特有的: advisory lock 咨询锁 :实现读写堵塞
+
+    7.3.2 基于多版本的并发控制
+
+        基于多个旧值版本
+
+        基于锁: 悲观锁: 预防性机制; 读写相互阻塞 封锁粒度大/时间长时并发性能差
+
+        基于MVCC:乐观锁: 后验性机制; 提交时才检验是否冲突; 并发性能高; (Oracle PostgreSQL mySQL(Innodb)都是MVCC并发控制机制)
+
+    7.3.3 pageinspect
+
+    create view v_pageinspect AS
+    	SELECT '(0,' || lp || ')' as ctid,
+    	case lp_flags
+    	when 0 then 'Unused'
+    	when 1 then 'Normal'
+    	when 2 then 'Redirect to '|| lp_off
+    	when 3 then 'Dead'
+    	end,
+    	t_xmid::text::int8 as xmin,
+    	t_xmax::text::int8 as xmax,
+    	tcid
+    	from heap_page_items(get_raw_page('tbl_mvcc',0))
+    	order by lp;
+
+    	//  syntax error at or near "SELECT"
+
+        function: get_raw_page / heap_page_items
+
+        pg_pack解决表膨胀
+
+        // extension brew install fail
+
+
+
+
+

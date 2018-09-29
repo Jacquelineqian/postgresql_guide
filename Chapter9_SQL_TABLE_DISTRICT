@@ -1,0 +1,203 @@
+8 表分区
+    8.1 分区表的意义
+        降低达标管理了成本 提升某些场景的性能
+
+    8.2 传统分区表
+
+        继承+触发器
+
+        8.2.1 继承表
+
+            create table tbl_log(id int4,create_date date,log_type text);
+            create table tbl_log_sql(sql text) inherits (tbl_log);
+
+            字表继承父表 且课外定义字段sql 类型为text
+
+            *** 从系统表中查询操作:
+
+            pg_class 系统表 table_oid是每个表的隐藏字段 表示系统表的的OID
+
+            select p.oid, c.* from tbl_log c, pg_class p where p.oid = c.table_oid;
+
+            *** 从子表查父表
+
+            select * from ONLY
+
+            继承表的逻辑: 儿子的都是爸爸的 爸爸的儿子没有
+
+            对于UPDATE DELETE SELECT操作 如果父表没有加only 则对父表和所有子表进行DML操作
+
+        8.2.2 创建分区表
+
+            1. 创建父表 除非有 <全局约束> 否则不应该在父表上定义<约束>
+
+            2. 使用inherit方式创建子表
+
+            3. 给所有子表创建 <约束>
+
+            4. 给所有子表创建索引 (索引不会继承)
+
+            5. 在父表定义 insert delete update触发器 将sql分发到对应分区
+
+            6. 启用constraint_exclusion 参数 提高父表sql性能
+
+            create table log_ins_201701(check (created_at>='2017-01-01' and created_at < '2017-02-01')) inherits(log_ins);
+            create table log_ins_201702(check (created_at>='2017-02-01' and created_at < '2017-03-01')) inherits(log_ins);
+            create table log_ins_201703(check (created_at>='2017-03-01' and created_at < '2017-04-01')) inherits(log_ins);
+            create table log_ins_201704(check (created_at>='2017-04-01' and created_at < '2017-05-01')) inherits(log_ins);
+            create table log_ins_201705(check (created_at>='2017-05-01' and created_at < '2017-06-01')) inherits(log_ins);
+            create table log_ins_201706(check (created_at>='2017-06-01' and created_at < '2017-07-01')) inherits(log_ins);
+            create table log_ins_201707(check (created_at>='2017-07-01' and created_at < '2017-08-01')) inherits(log_ins);
+            create table log_ins_201708(check (created_at>='2017-08-01' and created_at < '2017-09-01')) inherits(log_ins);
+            create table log_ins_201709(check (created_at>='2017-09-01' and created_at < '2017-10-01')) inherits(log_ins);
+            create table log_ins_201710(check (created_at>='2017-10-01' and created_at < '2017-11-01')) inherits(log_ins);
+            create table log_ins_201711(check (created_at>='2017-11-01' and created_at < '2017-12-01')) inherits(log_ins);
+            create table log_ins_201712(check (created_at>='2017-12-01' and created_at < '2018-01-01')) inherits(log_ins);
+
+            创建触发器 设置路由规则:
+
+            create or replace function log_ins_insert_trigger()
+                returns trigger
+                language plpgsql
+            as $function$
+            begin
+                if ( NEW.created_at <'2017-01-01') then
+                    insert into log_ins_history values (new.*);
+                ELSEIF ( NEW.created_at>='2017-01-01' and NEW.created_at < '2017-02-01' ) THEN INSERT INTO log_ins_201701 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-02-01' and NEW.created_at < '2017-03-01' ) THEN INSERT INTO log_ins_201702 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-03-01' and NEW.created_at < '2017-04-01' ) THEN INSERT INTO log_ins_201703 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-04-01' and NEW.created_at < '2017-05-01' ) THEN INSERT INTO log_ins_201704 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-05-01' and NEW.created_at < '2017-06-01' ) THEN INSERT INTO log_ins_201705 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-06-01' and NEW.created_at < '2017-07-01' ) THEN INSERT INTO log_ins_201706 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-07-01' and NEW.created_at < '2017-08-01' ) THEN INSERT INTO log_ins_201707 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-08-01' and NEW.created_at < '2017-09-01' ) THEN INSERT INTO log_ins_201708 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-09-01' and NEW.created_at < '2017-10-01' ) THEN INSERT INTO log_ins_201709 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-10-01' and NEW.created_at < '2017-11-01' ) THEN INSERT INTO log_ins_201710 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-11-01' and NEW.created_at < '2017-12-01' ) THEN INSERT INTO log_ins_201711 VALUES (NEW.*);
+                ELSEIF ( NEW.created_at>='2017-12-01' and NEW.created_at < '2018-01-01' ) THEN INSERT INTO log_ins_201712 VALUES (NEW.*);
+
+                ELSE
+
+                raise exception 'created_at out of range. Fix the log_ins_insert_trigger() function!';
+
+                END IF;
+                RETURN NULL;
+            end;
+            $function$;
+
+            触发器:
+
+            create trigger insert_log_ins_trigger BEFORE INSERT ON log_ins FOR EACH ROW EXECUTE PROCEDURE log_ins_insert_trigger();
+
+        8.2.3 使用分区表
+
+            insert into log_ins(user_id,created_at) select round(100000000*random()),generate_series('2016-12-01'::date,'2017-12-01'::date,'1 minute');
+
+            \dt+ log_ins*
+
+            // 父表没有数据 但可以通过查询父表找到子表中的数据
+
+            select * from log_ins limit 2;
+
+        8.2.4 查询父表还是子表
+
+            查询子表会快一点 尽量不访问父表 根据预先的分区约束定义 查子表
+
+        8.2.5 constraint_exclusion参数 是否根据约束来优化查询
+
+            constraint_exclusion on:    所有的表都通过约束 优化查询
+
+                                 off:   所有表都不通过约束优化查询
+
+                                 partition: 只对继承表和UNION ALL子查询通过检索约束来优化查询
+
+            set constraint_exclusion = partition;
+
+            扫描所有的分区带来的性能下降会很大 所以不建议设置off;
+
+            优化查询也会消耗性能 如果所有的表都开启 则增加优化器负担
+
+        8.2.6 添加分区
+
+            // 扩建分区方法1
+
+            1. 建表
+            CREATE TABLE log_ins_201801(CHECK (created_at >= '2018-01-01' and created_at < '218-02-01')) INHERITS (log_ins);
+            2. 建索引
+            CREATE INDEX idx_log_ins_201801_ctime ON log_ins_201801 USING btree(created_at);
+            3.刷新触发器函数log_ins_insert_trigger()
+            CREATE OR REPLAEE...
+
+            // 创建分区方法2(推荐)
+
+            1. 创建分区
+            CREATE TABLE log_ins_201802(LIKE log_ins INCLUDING ALL);
+            2. 添加约束
+            ALTER TABLE log_ins_201802 ADD CONSTRAINT log_ins_201802_create_time_check CHECK (created_at >='2018-02-01' and created_at < '2018-03-01');
+            3. 刷新trigger函数
+            刷新前备份函数代码
+            4. 所有步骤完成后, 将新分区log_ins_201802继承到父表
+            ALTER TABLE  log_ins_201802 INHERIT log_ins;
+
+            // 方法2的好处在于 将新分区所有操作完成后 再将分区集成到父表 降低添加分区的风险
+            // 最好添加分区前先在测试环境演示一遍
+
+        8.2.7 删除分区
+
+            分区表的优势在于: 大表管理方便 ; 删除历史数据可以直接删分区; 比DELETE效率高多个数量级
+
+            删除分区的方法:
+            1. DROP TABLE log_ins_201802;
+
+            2. 推荐: 删除分区与父表的继承关系
+                ALTER TABLE log_ins_201802 NO INHERIT log_ins;
+
+            // 方法2好处在于 201802不在属于父表的分区 但是02表仍然可以查询 提供缓冲时间 可以使这个子表机修继承父表
+
+        8.2.8 分表相关查询
+
+            // 方法1: 查看分区表定义 分区表信息:
+            \d log_ins
+            \d+ log_ins
+
+            // 方法2: 通过SQLmin命令
+            SELECT
+                nmsp_parent.nspname AS parent_schema,
+                parent.relname AS parent,
+                nmsp_child.nspname AS child_schema,
+                child.relname AS child_schema
+            FROM
+                pg_inherits JOIN pg_class parent
+                    ON pg_inherits.inhparent = parent.oid JOIN pg_class child
+                    ON pg_inherits.inhrelid = child.oid JOIN pg_namespace nmsp_parent
+                    ON nmsp_parent.oid = parent.relnamespace JOIN pg_namespace nmsp_child
+                    ON nmsp_child.oid = child.relnamespace
+                WHERE
+                    parent.relname = 'log_ins';
+
+
+        8.2.10 传统分区表注意事项
+
+            父表子表允许独立定义主键
+            test_development=# select * from test where id=1;
+             id | value
+            ----+-------
+              1 |     1
+              1 |     2
+            (2 rows)
+
+            test_development=# select * from test1;
+             id | value
+            ----+-------
+              1 |     1
+            (1 row)
+
+            test_development=# select * from test2;
+             id | value
+            ----+-------
+              1 |     2
+            (1 row)
+
+
+
+

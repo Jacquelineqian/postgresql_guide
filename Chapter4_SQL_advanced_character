@@ -1,0 +1,74 @@
+4.1 with 查询
+with t as (
+    select * from table where id>4;
+)
+select * from t;
+
+结构with t as () 建立临时新表 只能用户当前查询语句
+
+4.1.2 CTE
+    (1) RECURSIVE
+     with recursive 表名 (变量名) as(
+     select 1
+     union
+     select 变量 + 1
+     from 表名
+     where 变量 < 你需要限定的值
+     )
+
+     select sum(变量) from 表明;
+
+     1+2+3+4+5 = 15;
+
+     (2)递归查询父级节点
+
+     with recursive r as(
+     select * from test where id=7
+     union all
+     select test.* from test, r where test.id = r.fatherid
+     )
+     select * from r order by id;
+
+4.2 批量插入
+    1.
+    insert into table(field1,field2) select field1,field2 from table;
+    insert into table select * from table;
+
+    2.
+    insert into table(filed1,field2) values(f1_value,f2_value),(f1_value,f2_value);
+
+    3. copy语句
+    copy table_name from '***.txt';
+
+
+4.3 returning返回修改的数据
+
+insert语句,update语句或delete语句,在;号结束前加 returning * / returning fieldname
+
+4.4 upsert
+UPSERT = Insert ... on conflit update
+
+语法: insert 语句之后:
+    on conflict(冲突的字段名) do nothing;
+
+    on conflict(冲突的字段名) do update set 字段名1 = 表名.字段名 + EXCLUDED.字段名, 字段名2=123;(excluded表示内置表 即原来的表)
+
+4.5 数据抽样 table sample
+    1. order by random() limit num; 性能低
+    2. tablesample system(0.01)       随机抽取 抽样方式基于数据块级别 被选中的块上所偶的数据将被检索
+       tablesample bernoulli 80%    随机抽取表的数据行,并返回指定百分比数据,抽样方式基于数据行级别,比system具有更好的随机性但是性能低
+
+4.6 聚合数据group by
+
+select group_by_field,string_agg(table,'分隔符') from table;
+
+select group_by_field,array_agg(table) from table;
+
+计算平均值 增加字段查询avg(table) over (partition by group分组字段名) from table;
+
+排序添加初始行号 row_number() over()
+select row_number() over (可以为空 也可以写 partition by field 以及 order by field desc), * from score;
+
+为表添加排序 select rank() over() 行号会产生间隙 (两个人分数相同时会占位 有2个第1 1个第3)
+
+为表添加排序 select rank() over() 行号不产生间隙(两个人分数相同时不占位 有2个第1 1个第2)

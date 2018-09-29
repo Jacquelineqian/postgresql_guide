@@ -1,0 +1,46 @@
+5.1 逻辑和屋里存储结构
+    PostgresQL 分为 系统控制器(进程管理 进程管理的内存)
+                   查询分析器(获取数据集)
+                   事务系统(处理数据)
+                   恢复系统
+                   文件系统(硬件 持久化数据)
+
+    数据库集簇(Database Cluster)中的数据库 特点: 使用相同的全局配置文件
+                                            监听端口
+                                            共用进程和内存结构
+
+    数据库实例: Postgresql 中 指的是数据库集簇集簇集簇
+                其他关系型数据库中是指 进程分配的内存空间
+
+5.1.1 逻辑存储结构
+
+    user    ->      Database
+                    Schemas         ->          table
+                                                index
+                                                view
+                                                sequences
+                                                functions
+
+5.1.2 物理存储结构
+    $PGDATA 存储目录
+    文件布局:
+    OID
+    表空间
+    文件命名: relfilenode . 顺序号(根据1GB切割)
+    表文件内部结构: 内存块Buffer 磁盘块Page 索引和表Relation 行Tuple; BLACSZ(应该是一个可设置的值)决定Page大小 并微微决定数据库性能
+
+5.2 进程结构
+    5.2.1 守护进程与服务进程
+        postmaster:(守护进程)
+            数据库启动停用
+            监听客户端连接
+            为每个客户端连接fork单独的postgres服务进程
+            服务进程出错修复
+            管理数据文件
+            管理与数据库运行相关的辅助进程
+
+        postgres:(服务进程)
+            服务
+
+        其他辅助进程:
+            background writer: 简称bgwriterrrr 搜索共享缓存池 找被修改的页 从
