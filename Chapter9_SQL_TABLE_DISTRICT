@@ -202,7 +202,27 @@
             (1 row)
 
 
+    8.3 内置分区表
 
+        postgreSQL10新特性
+
+        8.3.1 创建分区表
+
+            // 主表语法结构
+
+            CREATE TABLE table_name [PARTITION BY {RANGE|LIST}] ( {column_name | (expression)} )
+
+            e.g.
+
+            CREATE TABLE log_par (id serial , user_id int4, created_at timestamp(0) without time zone) PARTITION BY RANGE (created_at);
+
+            // 分区语法结构
+
+            CREATE TABLE table_name PARTITION OF parent_table [()] FOR VALUES partition_bound_spec
+
+            e.g.
+
+            CREATE TEABLE log_par_his PARTITION OF log_par FOR VALUES FROM ('2017-02-01') TO ('2017-03-01');
 
 
 
