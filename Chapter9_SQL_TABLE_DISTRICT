@@ -218,11 +218,20 @@
 
             // 分区语法结构
 
-            CREATE TABLE table_name PARTITION OF parent_table [()] FOR VALUES partition_bound_spec
+            CREATE TABLE table_name PARTITION OF parent_table TABLE_NAME FOR VALUES partition_bound_spec
 
             e.g.
 
             CREATE TEABLE log_par_his PARTITION OF log_par FOR VALUES FROM ('2017-02-01') TO ('2017-03-01');
+
+            创建索引:
+
+            CREATE INDEX idx_lon_par_his_ctime ON lon_par_his USING btree(create_time);
+
+
+        8.3.2 使用分区表
+
+            INSERT INTO log_par(user_id,created-at) SELECT round(10000*random()),generate_series('2016-12-01'::date,'1017')
 
 
 

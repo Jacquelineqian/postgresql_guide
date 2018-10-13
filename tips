@@ -1,1 +1,10 @@
 打开数据库执行时间计时: \timing
+
+
+函数: generate_series(start, stop, step_interval);
+
+    e.g.    select generate_series(now(), now() + '7 days', '1 day');
+            select generate_series(to_date('20130403','yyyymmdd'), to_date('20130404','yyyymmdd'), '3 hours');
+
+
+

@@ -1,0 +1,27 @@
+10 性能优化
+
+查看系统配置 stats
+// 由于案例是Linux操作系统 没有应用
+
+10.3数据库优化
+
+ shareed_buffers    共享内存
+ work mem           内存数量
+ random_page_cost随机访问磁盘块代价  如果服务器使用固态磁盘 建议其设置的币seq_page_cost大一点 比如1.5
+
+10.3.2 统计信息 查询计划
+
+    系统表: pg_stat 或 pg_statio打头
+        内容: 支撑数据库系统内部方法的决策数据 例如合适运行autovavvum 如何解释查询计划 保存在pg_statistics中 超级管理员可以用
+
+    1. 表名: pg_stat_database:
+
+    numbackends: 后端数(并发连接数 理论上控制在cpu核数*1.5个)
+    blks_read blks_hit  读取磁盘块次数 块的缓存命中数
+    xact_commit xact_rollback: 提交回滚事务数
+    deadlocks 上次pg_stat_reset以来死锁数
+
+    2.表名: pg_stat_user_tables
+    last_vacuum last_analyze 最后一次在此表上手动执行vacuum和analyze的时间
+
+    last_autovacuum,last_autoanalyze 最后一次再次表上被autovacuum守护进程执行autovacuum和analyze的时间
