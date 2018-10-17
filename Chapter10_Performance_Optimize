@@ -3,9 +3,105 @@
 查看系统配置 stats
 // 由于案例是Linux操作系统 没有应用
 
+10.1 服务器硬件:
+    影响数据库性能的硬件因素有: CPU 磁盘 内存 网络
+
+    磁盘:    I/O吞吐量
+            SATA SSD 和 PCIe SSD 固态磁盘
+            企业级SSD > 消费级SSD
+
+    外部存储设备: SAN设备(存储区域网络)   使用块接口访问 与访问磁盘类似
+                NAS设备(网络接入存储)   使用标准文件协议访问
+                (特性: 需要考虑网络通信响应时长)
+
+10.2 操作系统优化:
+    10.2.1 Lunix性能工具
+        1. top(进程及其内存) (man top)
+        2. free(内存) (buffers 磁盘缓冲区 cache 磁盘读出缓存)
+            释放缓存命令:
+                sync
+                echo 1 > /proc/sys/vm/drop_caches
+        3.  vmstat
+            命令: vm [delay] [count] (每几秒采样1次 / 共采样几次)
+
+        4. iostat  (磁盘输入输出监控)(也可以查看:系统 适配器 tty设备 磁盘 cd_rom输入/输出统计 )
+            iostat -dx /dev/dfa [delay] [count]
+            (返回统计信息中 r=>read w=>write util=>利用率 rq-sz=>队列大小 qu-sz=>队列长度 rqm=reqqinguest_mount 请求数)
+
+        5. mpstat CPU的详细性能
+
+        6. sar 性能统计很重要的工具 配置在/etc/cron.d/sysstat中 默认10分钟
+                (1) 汇总cpu
+                    sar -q
+                (2) 汇总 I/O
+                    sar -b
+                (3) 历史数据
+                    历史保存在/var/log/sa中
+                    sar -q -f /var/log/sa/sal5 s 22:00:00 -e 23:00:00
+                    保存天数配置在 /etc/sysconfig/sysstat  HISTORY
+
+        7. 其他:
+            mnon 图形界面的top
+            iotop 观察I/O的top
+            系统查进程:
+                -D 不可中断的睡眠状态
+                -R 可执行状态
+                -S 可中断的睡眠状态
+                -T 暂停/追踪状态
+                -X dead退出 进程及姜小虎
+                -Z 退出 进程为僵尸进程
+            代码: for x  in `seq 3`; do ps -eo state,pid,cmd | grep "^D"; echo "--"; sleep 5;done;
+                while true; do date; ps auxf | awk '{if($8=="D" print $0;}';
+
+    10.2.2 Linux 系统的I/O调度算法
+            查看系统支持的调度算法: dmesg | grep -i scheduler
+            4种调度算法:
+                noop 电梯调度 基于FIFO队列 先进后出 适合SSD 不关注响应时间
+                cfq 绝对公平调度算法 为每个进程和县城单独创建队列管理IO 均匀分布IO带宽 适合通用服务器 是linux默认调度算法
+                deadline 绝对保障算法 为读写分别创建FIFO队列 内核收到请求时 尝试合并 不能合并则排序或放入队列 尽量在请求达到截止期限前调度
+                        适合虚拟机所在的宿主机器IO压力大时用 (适用场景: 数据库服务器)
+               anticipatory 未介绍
+
+               shell命令可临时修改调度算法 服务器重启后会恢复到系统默认值 永久修改要/etc/grub.conf
+
+    10.2.3 预读参数调整
+            概述: 设置预读磁盘扇区 扇区内的数据通过内存预读
+            查看预读扇区: /sbin/blockdev --getra /dev/sda
+            设置扇区 /sbin/blockdev --setra 16384 /dev/sda
+                    echo 16384 /sys/block/sda/queue/read_ahead_kb
+                    防止重启失效的设置: 写入rc.local
+                    echo "/sbin/blockdev --setra 16384 /dev/dfa /dev/sdal" >> /etc/rc.local
+
+    10.2.4 内存的优化
+
+        1. swap: 将长时间不用的程序释放物理内存 运行当前进程
+        OOM:out of memory内存溢出
+
+        系统将虚拟内存写入磁盘交换 但数据库还在内存中找数据
+
+        应对方法: 如果数据库写数据用到swap 则在有内存可用时释放swap( 先禁用swap 在打开swap )
+
+        2. 透明大页Trasparent HugePages
+            动态分配内存  运行时 内存分派会延误 建议关闭透明大页
+
+           查看透明大页的配置: cat /sys/kernel/mm/trasparent_hugepage/enabled (kernal 操作系统核心)
+            关闭:   echo never  /sys/kernel/mm/trasparent_hugepage/enabled
+
+            永久关闭透明大页 方法1
+                if test -f /sys/kernel/mm/transparent_hugepage/enabled; then
+                    echo never > /sys/kernel/mm/transparent_hugepage/enabled
+                fi
+                if test -f /sys/kernel/mm/transparent_hugepage/defrag; then (整理磁盘碎片)
+                    echo never > /sys/kernel/mm/transparent_huge/enabled
+                fi
+
+            永久关闭透明大页 方法2
+                /etc/grub.conf kernel 行末加上transparent_hugepage=never
+
+
 10.3数据库优化
 
- shareed_buffers    共享内存
+ shared_buffers    共享内存
  work mem           内存数量
  random_page_cost随机访问磁盘块代价  如果服务器使用固态磁盘 建议其设置的币seq_page_cost大一点 比如1.5
 
