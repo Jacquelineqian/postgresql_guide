@@ -82,7 +82,9 @@
         应对方法: 如果数据库写数据用到swap 则在有内存可用时释放swap( 先禁用swap 在打开swap )
 
         2. 透明大页Trasparent HugePages
-            动态分配内存  运行时 内存分派会延误 建议关闭透明大页
+            作用: 动态分配内存
+            缺点: 运行时 内存分派会延误
+            建议: 关闭透明大页
 
            查看透明大页的配置: cat /sys/kernel/mm/trasparent_hugepage/enabled (kernal 操作系统核心)
             关闭:   echo never  /sys/kernel/mm/trasparent_hugepage/enabled
@@ -100,10 +102,22 @@
 
 
 10.3数据库优化
+10.3.1 全局参数调整
+    postgrsql.conf配置文件参数:
+        shared_buffers    共享内存 默认128kB
+        work mem          内存数量
+        random_page_cost  随机访问磁盘块代价
+                          如果使用机械磁盘 这个参数不影响查询计划
+                          如果服务器使用固态磁盘 建议其设置的币seq_page_cost大一点 比如1.5
 
- shared_buffers    共享内存
- work mem           内存数量
- random_page_cost随机访问磁盘块代价  如果服务器使用固态磁盘 建议其设置的币seq_page_cost大一点 比如1.5
+        流程:
+        数据库开启->分配共享内存(无论有没有请求 都一直保持固定大小)(shared_buffers)->接收请求->在shared_buffers查找
+        ->↗️找到了 直接返回
+          ↘️找不到 服务进程操作系统请求请求数据-> 数据从磁盘加载
+
+        work men 不足时 服务进程会使用磁盘临时文件 使排序和hash性能严重下降
+                    检查方法: 排序时有Top-N heapsort, Quik sork, External merge这几种方法
+                    查询计划中如果使用了external merge 就是使用了磁盘临时文件 需要增加work_men值
 
 10.3.2 统计信息 查询计划
 
@@ -112,12 +126,64 @@
 
     1. 表名: pg_stat_database:
 
-    numbackends: 后端数(并发连接数 理论上控制在cpu核数*1.5个)
-    blks_read blks_hit  读取磁盘块次数 块的缓存命中数
-    xact_commit xact_rollback: 提交回滚事务数
-    deadlocks 上次pg_stat_reset以来死锁数
+        numbackends: 后端数(并发连接数 理论上控制在cpu核数*1.5个)
+        blks_read blks_hit  读取磁盘块次数 块的缓存命中数
+        xact_commit xact_rollback: 提交回滚事务数
+        deadlocks 上次pg_stat_reset以来死锁数
 
     2.表名: pg_stat_user_tables
-    last_vacuum last_analyze 最后一次在此表上手动执行vacuum和analyze的时间
+        last_vacuum last_analyze 最后一次在此表上手动执行vacuum和analyze的时间
 
-    last_autovacuum,last_autoanalyze 最后一次再次表上被autovacuum守护进程执行autovacuum和analyze的时间
+        last_autovacuum,last_autoanalyze 最后一次再次表上被autovacuum守护进程执行autovacuum和analyze的时间
+
+    3. pg_stat_statements
+        create extension pg_stat_statements; // 启用
+
+    4. 查看sql执行计划:
+        执行计划 即 查询计划 显示用什么方法扫描表
+        扫描方法2种: 顺序扫描 索引扫描
+        查看执行计划: EXPLAIN 关键字
+        查看真是的查询计划分析: ALALYZE 关键字
+
+        使用ALALYZE COSTS BUFFERS TIMING(??) FORMAT VERBOSE选项输出详细的查询计划:
+
+        EXPLAIN (ANALYZE on, TIMING on , VERBOSE on, BUFFERS on) SELECT * FROM tbl WHERE id=10;
+
+    高度的需求 使用session级别的log_xxx_stats判断查询效果:
+
+    第一组:log_parser_stats log_planner_stats
+
+    第二组: log_statement_stats
+
+    两组参数不能同时设置为on
+
+    设置方法:
+    set client_min_messages = log;
+    set log_parser_stats = on;
+    set log_planner_stats = on;
+    set log_statement_stats = off;
+
+    第一组:
+    分4个展示查询log集
+       parse statistics
+       parse analysis statistics
+       rewriter statistics
+       planner statistics
+
+    第二组:
+        query statistics
+
+10.3.3 索引管理与维护
+
+    postgresql 索引类型:
+        B-tree hash GiST GIN BRIN Bloom
+
+        B-tree 最常见 适合于包含多个 组成值 的数据值 如数组
+        GiST 是通用的索引接口 可以使用GiST实现B-Tree R-tree等索引结构
+
+        除了hash Bloom以外 以上都适用多列索引
+
+        postgresQL还支持: 唯一索引 表达式索引 部分索引 多列索引
+
+
+
