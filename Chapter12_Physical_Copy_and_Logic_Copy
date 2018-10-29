@@ -1,0 +1,245 @@
+12 物理复制 逻辑复制
+
+    物理复制
+        定义: 也称流复制 是指从 实例级 中复制和主库一模一样的作为从库(也称为备库)
+        特点: 同步方式: 同步 异步
+        两种同步方式的差异 部署过程: // TODO 补充
+
+    逻辑复制
+        定义: 也称选择性复制 是指能做到 表级别 的复制
+        特点:
+
+    原理: 逻辑复制 物理复制 都是基于 WAL日志记录
+    WAL日志是二进制格式
+    物理复制: 主库将WAL发给备库 备库对WAL重做
+    逻辑复制: 预先设置规则 解析WAL日志 主库将逻辑变化信息发给从库 从库根据这个信息应用日志
+
+    区别:
+        物理复制 对表结构的修改会同步 逻辑复制不同步增减字段之类
+        物理复制 不允许写 逻辑复制允许写
+        物理复制 psql的大版本要一致 逻辑复制不一致
+
+
+12.1 异步流复制
+
+    同步流复制: 主库要等待从库 接收wal日志 并 写入wal日志 返回成功
+    异步流复制: 主库不需要等待
+
+    异步流复制的复制方式:
+        1. 文件拷贝 2. 使用命令行工具pg_basebackup
+
+    12.1.1 拷贝数据文件:
+        配置$PGDATA/postgresql.conf设置以下参数:
+        wal_level = replica                 # minimal,replica, or logical
+        archive_mode = on                   # enables archiving; off, on, or always
+        archive_command = '/bin/data'       # command to use to
+        max_wal_senders = 10;               # max number of walsender processes; 从库进程数
+        wal_keep_segments = 512;            # in logfile segments, 16MB each; 0 disables 日志保存数(日志每16MB创建一个新的)
+
+
+        wal_level : minimal 仅记录数据库异常关闭 需要回复时的WAL信息
+                    replica 支持的WAL归档,复制和备库中农启用只读查询等操作所需的WAL信息
+                    logical 记录的WAL日志最多 包含支持逻辑解析的WAL
+
+                    这3个是依次包含的关系 minimal ∈ replica ∈ logical
+
+        archive_mode 是否启用归档 off不启用 on启用(会使用archive_command的参数设置将WAL日志归档)
+
+        archive_command 设置归档(13章会具体讲解)
+
+        max_wal_senders 主库最大WAL发送数 通过pg_basebackup命令备份时也会消耗WAL进程 所以此参数不能设置的比max_connections高
+                        通常1个流复制备库消耗1个WAL发送进程
+
+        wal_keep_segments 主库的pg_wal目录保留的最小WAL日志数 方便从库落后的时候追回
+
+        hot_standby 恢复过程中是否启用读操作 常用于流复制备库 开启后备库只支持读SQL
+
+
+        主库和备库的postgresql.conf参数配置建议一致
+
+        主库的pg_hba.conf文件添加以下内容:
+
+            # replication privilege
+
+            host replication repuser 192.168.28.74/32       md5
+            host replication repuser 192.168.28.75/32       md5
+
+            配置两条策略 是因为主库备库的角色是可以互换的 因此建议主库备库的配置一致
+
+
+        配置完成后:
+
+        1. 主库启动数据库pg_ctl start
+
+        2. 创建流复制用户 要有replication 权限 和 login权限
+
+            CREATE USER repuser REPLICATION LOGIN CONNECTION LIMIT5 ENCRYPTED PASSWORD 'rel2a345';
+
+            (encrypted 加密的)
+
+        3. 制作备库时 主库仍然可写:
+
+            SELECT pg_start_backup('francs_bk1');
+
+            这个pg_start_backup函数在主库上发起一个在线备份 命令执行成功后 将数据文件拷贝到pghost2:
+
+            tar czvf pg_root.tar.gz pg_root --exclude=pg_root/pg_wal
+
+            scp pg_root.tar.gz postgres@192.168.28.75:/database/pg10
+
+        4. 完成后 备份节点的pg_wal目录需要手工创建 以上只是拷贝了pg_root系统数据目录 如有其他表空间也要拷贝
+
+            在pghost2解压文件
+
+            tar xvf pg_root.tar.gz
+
+        5. 以上完成了在线备份 但备库还有一些配置
+
+            pghost2 上 recovery.conf 提供数据库回复相关的配置参数 这个文件在默认$PGDATA不存在 需要在软件目录找到复制到$PGDATA:
+
+            cp $PGHOME/share/recovery.conf.sample $PGDATA/recovery.conf
+
+        6. recovery.conf 写:
+
+            recovery_target_timeline = 'latest'         从备份中恢复到最近的时间线
+            standby_mode = on                           是否启用数据库为备库 如果On 备库会不停的从主库上获取WAL日志流
+            primary_conninfo = 'host=192.168.28.74 port=1921 user=repuser'      主库的连接信息
+
+        7.  touch .pgpass
+            chmod 0600 .pgpass
+
+            .pgpass添加:
+            192.168.28.74:1921:replication:repuser:re12a345
+            192.168.28.75:1921:replication:repuser:re12a345
+
+        7.1 备库上postgresql.conf hot_standby参数设置为on 才能支持查询操作 设置后要重启数据库
+            hot_standby = on        # "off" disallows queries during recovery
+
+            设置为off 会报错:
+            FATAL: the database system is starting up
+
+        8. pg_ctl start
+
+            如果不报错 可以看到WAL发送进程
+
+        9. 测试是否同步成功
+            在主库上建新表 并插入数据 查看备库上有没有
+
+        10. tip: 如果配置过程中出错 可以查看$PGDATA/pg_log 查看日志排查错误
+
+    12.1.2 以pg_basebackup方式部署流复制
+
+        概述:
+
+        pg_basebackup是一个命令行工具 将 pg_start_backup('francs_bk1') 和 复制$PGDATA数据文件和表空间文件到备库 和 pg_stop_backup() 合为1步
+
+        pg_basebackup工具需要超级管理员权限或REPLICATION权限 注意设置 max_wal_senderscanshu
+
+
+        步骤:
+
+            1. 停止原来的备库 并删除
+
+                pg_ctl stop -m fast
+
+                rm -rf /database/pg10/pg_root
+                rm -rf /database/pg10/pg_tbs
+
+            2. 在pghost 使用pg_basebackup工具做基准备份
+
+                pg_basebackup -D /database/pg10/pg_root -Fp -Xs -v -P -h 192.169.28.74((即主库的地址)) -p 1921 -U repuser
+
+                以上操作中    1. 先对数据库做一次checkpoint
+                            2. 再基于时间点做一个全库及准备分
+                            3. 拷贝$PGDATA数据文件和表空间文件到备库节点对应目录
+
+                -D: 目录
+                -F: 指定备份数据的格式 p格式plain t格式tar
+                    tar格式中 有base.tar 系统文件 oid.tar 表空间文件
+
+                -X: 备份过程中产生的WAL日志包含在备份中的方式 f(fetch) s(stream)
+                    f是WAL日志传到备份节点 要求主库的wal_keep_segments设置得大一点 以免备份的WAL没给备库就删了; 主库会启动WAL发送进程
+                    s是 既启一个进程 发送备份日志 还要启一个进程 发WAL增量日志流 避免主库WAL被覆盖 生产环境流复制部署推荐这个方式 特别是比较繁忙的大库
+
+                -v: verbose 执行过程中打印各阶段日志
+                -P: 显示数据文件 表空间文件 传输百分比
+
+            3. cp ~/recovery.conf $PGDATA
+
+            4. pg_ctl start 启动备库pghost2
+
+    12.1.3 查看流复制同步方式
+
+        pg_stat_replication系统视图 sync_stat字段
+
+        select usename, application_name, client_adr,sync_state from pg_stat_replication;
+
+        主库上有多少WAL发送进程 就有多少记录
+
+        其中 sync_stat值为: 1. async 异步 2. potential 异步同步 如单签备库宕机 异步备库升级为同步备库 3. sync 同步 4. quorum: 新特性
+
+12.2 同步流复制
+
+12.2.1 sychronous_commit WAL配置参数
+
+sychronous_commit值 作用: 当数据库提交事务时是否等待WAL日志写入硬盘后再向客户端返回成功
+
+场景1: 单实例环境
+
+on: WAL先写入WAL BUFFER 在写入WAL日志文件
+    很安全 但是数据库性能损耗
+
+off: 不需要等WAL BUFFER 写入WAL日志返回成功
+     数据库宕机时 最新提交的少量事务可能丢失
+     数据准确性低
+
+local: 和on一样
+
+场景2 流复制环境:
+
+remote_write: 主库等待备库接收WAL 并写入操作系统缓存 才返回成功
+              如果备库异常关闭 不会有WAL日志丢失风险
+              如果备库异常宕机 备库没有重做完
+              没有持久化完毕 有数据丢失风险
+              响应时间短
+
+on: 等待WAL接收 并写入WAL文件 才返回成功
+    响应时间较长
+
+remote_apply: 等待WAL接收 写入WAL文件 完成重做 才返回成功
+              响应时间最长
+
+12.2.2 配置同步流复制
+
+备库的recovery.conf中配置:
+
+primary_conninfo = 'host=192.168.28.74 port=1921 user=repuser application_name=node2'
+
+// application_name 指定备用节点的别名
+// 主库postgresql.conf中synchronous_standby_names参数可以引用这里的node2
+
+主库的postgresql.conf 配置文件:
+
+synchronous_commit=on 或 remote_apply    // 有2分持久化的WAL日志
+synchronous_standby_names = 'node2'     // 备库列表
+
+wal_level=replica或logical(异步流复制已配置)
+
+配置完毕:
+主库: pg_ctl reload
+备库: pg_ctl restart -m fast
+
+recovery.conf修改要重启数据库
+wal_level需要重启数据库
+postgresql.conf 修改synchronous_commit和synchronous_standby_names只需要 pg_ctl reload
+
+
+
+
+
+
+
+
+
+
+
