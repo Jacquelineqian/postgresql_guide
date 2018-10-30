@@ -38,7 +38,7 @@
 
 
         wal_level : minimal 仅记录数据库异常关闭 需要回复时的WAL信息
-                    replica 支持的WAL归档,复制和备库中农启用只读查询等操作所需的WAL信息
+                    replica 支持的WAL归档,复制 备库中只读查询操作需要的WAL信息
                     logical 记录的WAL日志最多 包含支持逻辑解析的WAL
 
                     这3个是依次包含的关系 minimal ∈ replica ∈ logical
@@ -172,7 +172,7 @@
 
         pg_stat_replication系统视图 sync_stat字段
 
-        select usename, application_name, client_adr,sync_state from pg_stat_replication;
+        select usename, application_name, client_addr,sync_state from pg_stat_replication;
 
         主库上有多少WAL发送进程 就有多少记录
 
@@ -234,12 +234,50 @@ wal_level需要重启数据库
 postgresql.conf 修改synchronous_commit和synchronous_standby_names只需要 pg_ctl reload
 
 
+查看复制状态:
 
+    SELECT usename, application_name, client_addr, sync_state FROM pg_stat_replication;
 
+    查询到: sync_state = sync
 
+12.2.3 同步复制不能用于生产环境
 
+    由于主库的写操作会等到收到备库同步完毕才会继续 如果备库宕机 就会阻塞所有的写操作
 
+    推荐做法: 设置一主多从: 两个从库一个同步一个异步 同步的备库宕机 异步的数据库升级为同步数据库
 
+    详见12.7
+
+12.3 单实例下的同步/异步流复制性能测试
+
+    单实例的主库配置:
+        wal_level = replica; (日志备份记录内容为: 查询操作的要用到的WAL)
+        synchronous_commit = off;
+
+    异步流复制主库配置:
+        wal_level = replica;
+        synchronous_commit = off;
+        wal_keep_segments = 512;
+
+    同步流复制主库配置:
+        wal_level = replica;
+        synchronous_commit = on;
+        synchronous_standby_names = 'node2';
+        wal_keep_segments = 512;
+
+    单例/同步流/异步流读性能差不多
+
+    同步写性能极低 出现大量阻塞 通讯时间长 tps低(tps是每秒处理事务数)
+
+12.4 流复制监控
+
+    pg_stat_replication 表
+
+    state: streaming 已追上主库; backup正在备份; stopping 停止; startup 启动中;
+    *_sln: 日志位置
+    *_lag: *=write>flush>reply=WAL日志流在操作系统缓存中>写入备库日志文件>应用日志完毕
+    sync_priority 备库被选为同步备库优先级 启用quorum选举模式下应用
+    sync_state: async>potential>sync>quprum = 异步
 
 
 
