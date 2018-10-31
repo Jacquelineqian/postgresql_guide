@@ -240,7 +240,7 @@ postgresql.conf 修改synchronous_commit和synchronous_standby_names只需要 pg
 
     查询到: sync_state = sync
 
-12.2.3 同步复制不能用于生产环境
+12.2.3 同步œ复制不能用于生产环境
 
     由于主库的写操作会等到收到备库同步完毕才会继续 如果备库宕机 就会阻塞所有的写操作
 
@@ -280,4 +280,40 @@ postgresql.conf 修改synchronous_commit和synchronous_standby_names只需要 pg
     sync_state: async>potential>sync>quprum = 异步
 
 
+12.4.2 监控主库备库延迟情况
 
+    pg_stat_replication表中 根据先后执行顺序 写入缓存 先于 WAL日志写入 先于 WAL日志应用 write_lag<flush_lag<replay_lag
+    延迟情况看主库备库设备的负载
+
+    方式1: 通过WAL延迟时间衡量
+    select usename, pid,client_addr, write_lag,flush_lag,replay_lag from pg_stat_replication;
+    10以前的postgresq版本看pg_last_xact_replay_timestamp()函数 显示WAL日志最近应用时间
+    粗略 主库宕机时可用 主库只读时取到值为静态不可用
+
+    方式2: 通过WAL日志应用延长时间衡量:
+    用pg_wal_lsn_diff()函数 参数1为pg_current_wal_lsn()函数 参数2为write_lsn字段
+    select pid,usename,client_addr,state,
+    pg_wal_lsn_diff(pg_current_wal_lsn(),write_lsn) write_delay,
+    pg_wal_lsn_diff(pg_current_wal_lsn(),flush_lsn) flush_delay,
+    pg_wal_lsn_diff(pg_current_wal_lsn(),replay_lsn) replay_delay,
+    from pg_stat_replication;
+    主库宕机时不可用
+
+    方式3: 通过创建主备延时测算表方式
+    建表 插入数据 记录创建时间 更新时间
+    查看备库的创建更新时间
+    是很实用的方法
+
+14.4.3
+    WAL接收也有表 pg_stat_wal_receiver
+
+14.4.4 函数
+
+    pg_is_in_recovery();
+        //返回值: t 备库 f 主库
+
+    pg_last_wal_receive_lsn();
+    pg_last_wal_replay_lsn();
+    pg_last_xact_replay_timestamp();
+    pg_current_wal_lsn();
+    pg_wal_lsn_diff('3/90001B0','');
